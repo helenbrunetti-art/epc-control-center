@@ -6,6 +6,8 @@ const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
+const { pool } = require("./db");
+const { applySchema } = require("./applySchema");
 const authRoutes = require("./routes/auth");
 const agentsRoutes = require("./routes/agents");
 const documentsRoutes = require("./routes/documents");
@@ -84,6 +86,30 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`[server] EPC Control Center rodando na porta ${PORT} — frontend ${HAS_FRONTEND_BUILD ? "servido" : "AUSENTE"}`);
-});
+
+// ---------------------------------------------------------------
+// Aplica o schema automaticamente no boot (idempotente: CREATE TABLE
+// IF NOT EXISTS + ON CONFLICT DO UPDATE). Isso elimina a necessidade
+// de acesso a Shell/SSH para rodar `npm run migrate` manualmente —
+// importante porque o plano gratuito do Render não oferece Shell.
+// Pode ser desligado com AUTO_MIGRATE=false, se preferir controlar
+// a migração manualmente (ex: em ambientes com múltiplas instâncias).
+// ---------------------------------------------------------------
+async function start() {
+  if (process.env.AUTO_MIGRATE !== "false") {
+    try {
+      console.log("[server] aplicando schema do banco (auto-migração)...");
+      await applySchema(pool);
+      console.log("[server] schema OK.");
+    } catch (err) {
+      console.error("[server] falha ao aplicar schema automaticamente:", err.message);
+      console.error("[server] o servidor vai subir mesmo assim, mas rotas que usam o banco podem falhar até isso ser corrigido.");
+    }
+  }
+
+  app.listen(PORT, () => {
+    console.log(`[server] EPC Control Center rodando na porta ${PORT} — frontend ${HAS_FRONTEND_BUILD ? "servido" : "AUSENTE"}`);
+  });
+}
+
+start();
